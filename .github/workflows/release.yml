@@ -1,0 +1,180 @@
+# Builds the Windows installer, the signed Android APK and the Linux server, then publishes a GitHub release.
+# Start it by pushing a tag (git tag v0.2.0 && git push origin v0.2.0) or from the Actions tab with a version.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия, например 0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      code: ${{ steps.v.outputs.code }}
+    steps:
+      - id: v
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          V="${INPUT:-${GITHUB_REF_NAME#v}}"
+          if ! [[ "$V" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then echo "Версия должна быть вида 1.2.3, получено: $V"; exit 1; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "code=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - run: npm ci --no-audit --no-fund
+      - run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - run: npx tauri build --config "{\"version\":\"$VERSION\"}"
+      - run: |
+          mkdir -p ../out
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe ../out/buh-windows-x64-setup.exe
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: out/*
+          if-no-files-found: error
+
+  android:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0 platform-tools'
+      - run: npm ci --no-audit --no-fund
+      - run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+      - run: npm run build:native && npx cap sync android
+      - name: Build signed APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          BUH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          BUH_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          BUH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          BUH_VERSION: ${{ needs.version.outputs.version }}
+          BUH_VERSION_CODE: ${{ needs.version.outputs.code }}
+        run: |
+          export BUH_KEYSTORE="$RUNNER_TEMP/buh-release.jks"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$BUH_KEYSTORE"
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          rm -f "$BUH_KEYSTORE"
+          mkdir -p ../../out
+          cp app/build/outputs/apk/release/app-release.apk ../../out/buh-android.apk
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android
+          path: out/*
+          if-no-files-found: error
+
+  server:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm run build
+      - working-directory: server
+        run: |
+          go test ./...
+          cp -r ../app/dist/. web/
+          mkdir -p ../out
+          for arch in amd64 arm64; do GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "../out/buh-server-linux-$arch" .; done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: server
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: [version, windows, android, server]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: out
+          merge-multiple: true
+      - run: ls -la out && (cd out && sha256sum * > SHA256SUMS.txt)
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Семейный бюджет ${{ env.VERSION }}
+          generate_release_notes: true
+          body: |
+            | Файл | Для чего |
+            |---|---|
+            | `buh-windows-x64-setup.exe` | Windows 10/11, установка без прав администратора |
+            | `buh-android.apk` | Android 7 и новее |
+            | `buh-server-linux-amd64`, `buh-server-linux-arm64` | сервер с веб-версией внутри |
+
+            Установка или обновление сервера одной командой:
+            ```
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/deploy/install.sh | sudo bash -s -- --domain ваш-домен
+            ```
+          files: out/*
+          fail_on_unmatched_files: true

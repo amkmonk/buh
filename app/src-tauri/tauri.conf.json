@@ -1,0 +1,44 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Семейный бюджет",
+  "mainBinaryName": "buh",
+  "version": "1.0.0",
+  "identifier": "ru.family.buh",
+  "build": {
+    "frontendDist": "../dist-native",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build:native"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Семейный бюджет",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 380,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Семейный бюджет",
+    "shortDescription": "Домашняя бухгалтерия",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Russian"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

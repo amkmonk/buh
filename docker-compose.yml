@@ -1,0 +1,25 @@
+services:
+  buh:
+    build: .
+    image: buh-server:local
+    container_name: buh
+    restart: unless-stopped
+    ports:
+      - "${BUH_PORT:-8080}:8080"
+    environment:
+      # The first user is created on the first start only, while the database has no users.
+      BUH_ADMIN_LOGIN: ${BUH_ADMIN_LOGIN:-admin}
+      BUH_ADMIN_PASSWORD: ${BUH_ADMIN_PASSWORD:-changeme}
+      BUH_ADMIN_NAME: ${BUH_ADMIN_NAME:-Админ}
+    volumes:
+      - buh-data:/data
+    mem_limit: 64m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "3"
+
+volumes:
+  buh-data:

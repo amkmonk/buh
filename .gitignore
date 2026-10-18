@@ -1,0 +1,15 @@
+node_modules/
+app/dist/
+app/dist-native/
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+server/web/*
+!server/web/.keep
+*.db
+*.db-shm
+*.db-wal
+.env
+release/
+*.keystore
+*.jks
+keystore.properties
