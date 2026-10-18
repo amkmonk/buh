@@ -7,8 +7,7 @@ import { MobileStructSettings } from './settings'
 import { BackupsPanel } from './backups'
 import { balances, cellKey, groupsAt, lastCheck, monthStats, tileState } from '../lib/model'
 import { WD, capitalize, compact, curMonth, dayLabel, dim, fmt, monName, monthTitle, pad, rub, shiftYM, shortDay, sum, todayStr, trats, weekday, weeksOf } from '../lib/format'
-import { moveExpenses, removeRow } from '../lib/repo'
-import type { Expense } from '../lib/types'
+import { removeRow } from '../lib/repo'
 import { useSyncState } from '../lib/sync'
 import { Capacitor } from '@capacitor/core'
 import { App as CapApp } from '@capacitor/app'
@@ -110,8 +109,7 @@ function useDragScroll() {
 }
 
 export function Mobile() {
-  const { data, toast, flash } = useApp()
-  const [moving, setMoving] = useState<Expense[] | null>(null)
+  const { data } = useApp()
   useDragScroll()
   const [tab, setTab] = useState<Tab>('exp')
   const [month, setMonth] = useState(curMonth())
@@ -166,30 +164,10 @@ export function Mobile() {
         {tab === 'exp' && expView === 'table' && (
           <>
             <Tiles M={M} onTile={(g) => (setIncG(g), goTab('inc'))} />
-            {moving && (
-              <div className="mv-bar" role="status">
-                <span>
-                  Перенос <b>{rub(sum(moving, (e) => e.amt))}</b>: нажмите ячейку, куда перенести
-                </span>
-                <button className="btn ghost sm" onClick={() => setMoving(null)}>
-                  Отмена
-                </button>
-              </div>
-            )}
             <MobileTable
               M={M}
               sel={sheet ? { c: sheet, d: Math.min(day, dim(M)) } : null}
-              moving={!!moving}
               onCell={(c, d) => {
-                if (moving) {
-                  const rows = moving
-                  setMoving(null)
-                  const date = M + '-' + pad(d)
-                  void moveExpenses(rows, c, date).then((ids) => {
-                    flash(ids)
-                    toast(`Перенесено ${rub(sum(rows, (e) => e.amt))}, ${shortDay(date)}`)
-                  })
-                }
                 setDay(d)
                 setSheet(c)
               }}
@@ -225,14 +203,6 @@ export function Mobile() {
             <span className="ph-grab" />
             <ExpenseCard key={`${M}|${sheet}|${day}`} M={M} c={sheet} day={Math.min(day, dim(M))} onDay={(d) => setDay(Math.min(Math.max(1, d), dim(M)))} onClose={() => setSheet(null)}
               variant="sheet"
-              onPick={
-                expView === 'table'
-                  ? (rows) => {
-                      setMoving(rows)
-                      setSheet(null)
-                    }
-                  : undefined
-              }
               onMoved={(c, date) => {
                 if (!date.startsWith(M)) setMonth(date.slice(0, 7))
                 setDay(+date.slice(8))

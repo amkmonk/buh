@@ -7,16 +7,14 @@ import { StructSettings, UsersSettings } from './settings'
 import { BackupsPanel } from './backups'
 import { balances, cellKey, groupsAt, lastCheck, monthStats, tileState } from '../lib/model'
 import { GEN, WD, curMonth, dayLabel, daysBetween, dim, fmt, monGen, monName, monthTitle, nextDay, pad, parseYM, rub, shiftYM, shortDay, sum, todayStr, trats, weekday, weeksOf } from '../lib/format'
-import { moveExpenses, removeRow } from '../lib/repo'
-import type { Expense } from '../lib/types'
+import { removeRow } from '../lib/repo'
 
 type View = 'table' | 'income' | 'settings'
 type ModalState = { kind: 'group'; g: string } | { kind: 'checks' } | null
 
 export function Desktop() {
-  const { data, toast, flash } = useApp()
+  const { data } = useApp()
   const [month, setMonth] = useState(curMonth())
-  const [moving, setMoving] = useState<Expense[] | null>(null)
   const [view, setView] = useState<View>('table')
   const [pop, setPop] = useState<{ c: string; day: number } | null>(null)
   const [modal, setModal] = useState<ModalState>(null)
@@ -30,26 +28,6 @@ export function Desktop() {
     setScrollDay(null)
   }
   const closeModal = useCallback(() => setModal(null), [])
-
-  // While moving, a click on a cell puts the expenses there; Esc cancels.
-  useEffect(() => {
-    if (!moving) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMoving(null)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [moving])
-  const dropInto = async (c: string, day: number) => {
-    if (!moving) return
-    const rows = moving
-    setMoving(null)
-    const date = M + '-' + pad(day)
-    const cat = monthStats(data, M).cats.find((x) => x.id === c)
-    flash(await moveExpenses(rows, c, date))
-    toast(`Перенесено ${rub(sum(rows, (e) => e.amt))} в «${cat?.name}», ${shortDay(date)}`)
-    setPop({ c, day })
-  }
 
   return (
     <div className="app">
@@ -66,29 +44,7 @@ export function Desktop() {
         onChecks={() => setModal({ kind: 'checks' })}
       />
       <div className="view">
-        {view === 'table' && moving && (
-          <div className="mv-bar" role="status">
-            <span>
-              Перенос{' '}
-              <b>
-                {trats(moving.length)} на {rub(sum(moving, (e) => e.amt))}
-              </b>
-              : нажмите ячейку, куда перенести. Можно переключить месяц.
-            </span>
-            <button className="btn ghost sm" onClick={() => setMoving(null)}>
-              Отмена
-            </button>
-          </div>
-        )}
-        {view === 'table' && (
-          <MonthTable
-            M={M}
-            pop={pop}
-            scrollDay={scrollDay}
-            moving={!!moving}
-            onCell={(c, day) => (moving ? void dropInto(c, day) : setPop({ c, day }))}
-          />
-        )}
+        {view === 'table' && <MonthTable M={M} pop={pop} scrollDay={scrollDay} onCell={(c, day) => setPop({ c, day })} />}
         {view === 'income' && <IncomePage M={M} onBack={() => setView('table')} />}
         {view === 'settings' && <SettingsPage M={M} onBack={() => setView('table')} />}
       </div>
@@ -99,10 +55,6 @@ export function Desktop() {
           day={pop.day}
           onDay={(d) => setPop({ c: pop.c, day: Math.min(Math.max(1, d), dim(M)) })}
           onClose={() => setPop(null)}
-          onPick={(rows) => {
-            setMoving(rows)
-            setPop(null)
-          }}
           onMoved={(c, date) => {
             if (!date.startsWith(M)) setMonth(date.slice(0, 7))
             setPop({ c, day: +date.slice(8) })
@@ -208,13 +160,11 @@ function MonthTable({
   M,
   pop,
   scrollDay,
-  moving,
   onCell,
 }: {
   M: string
   pop: { c: string; day: number } | null
   scrollDay: number | null
-  moving: boolean
   onCell: (c: string, day: number) => void
 }) {
   const { data } = useApp()
@@ -309,7 +259,7 @@ function MonthTable({
 
   const groups = groupsAt(data, M)
   return (
-    <div className={'gridwrap' + (moving ? ' moving' : '')} ref={wrap}>
+    <div className="gridwrap" ref={wrap}>
       <table className="sheet">
         <thead>
           <tr>
@@ -394,7 +344,6 @@ function CellPop({
   day,
   onDay,
   onClose,
-  onPick,
   onMoved,
 }: {
   M: string
@@ -402,7 +351,6 @@ function CellPop({
   day: number
   onDay: (d: number) => void
   onClose: () => void
-  onPick: (rows: Expense[]) => void
   onMoved: (c: string, date: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -467,7 +415,7 @@ function CellPop({
 
   return (
     <div className="pop" ref={ref} role="dialog" aria-label="Траты в ячейке" style={{ left: pos.left, top: pos.top }}>
-      <ExpenseCard key={`${M}|${c}|${day}`} M={M} c={c} day={day} onDay={onDay} onClose={onClose} variant="pop" onPick={onPick} onMoved={onMoved} />
+      <ExpenseCard key={`${M}|${c}|${day}`} M={M} c={c} day={day} onDay={onDay} onClose={onClose} variant="pop" onMoved={onMoved} />
     </div>
   )
 }

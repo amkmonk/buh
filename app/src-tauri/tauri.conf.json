@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Семейный бюджет",
   "mainBinaryName": "buh",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "identifier": "ru.family.buh",
   "build": {
     "frontendDist": "../dist-native",

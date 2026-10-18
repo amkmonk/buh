@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useApp } from '../state'
 import { Avatar, InlineEdit, useFlashClass } from './common'
 import { catsAt, groupsAt, balances, lastCheck } from '../lib/model'
@@ -16,7 +16,6 @@ export function ExpenseCard({
   onDay,
   onClose,
   variant,
-  onPick,
   onMoved,
 }: {
   M: string
@@ -25,9 +24,7 @@ export function ExpenseCard({
   onDay: (d: number) => void
   onClose: () => void
   variant: 'pop' | 'sheet'
-  /** When set, the move panel offers picking the target cell in the table. */
-  onPick?: (rows: Expense[]) => void
-  /** Called after expenses were moved through the form. */
+  /** Called after expenses were moved (dragged to a cell or through the form). */
   onMoved?: (c: string, date: string) => void
 }) {
   const { data, me, toast, flash } = useApp()
@@ -46,6 +43,15 @@ export function ExpenseCard({
 
   if (!cat) return null
   const moving = moveIds ? es.filter((e) => moveIds.includes(e.id)) : []
+
+  // Dropped on a table cell of the same month.
+  const dropTo = (rows: Expense[]) => async (toC: string, toDay: number) => {
+    const toDate = M + '-' + pad(toDay)
+    if (toC === c && toDate === date) return
+    flash(await moveExpenses(rows, toC, toDate))
+    toast(`Перенесено ${rub(sum(rows, (e) => e.amt))} в «${catsAt(data, M).find((x) => x.id === toC)?.name}», ${shortDay(toDate)}`)
+    onMoved?.(toC, toDate)
+  }
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault()
@@ -113,9 +119,9 @@ export function ExpenseCard({
                   if (a !== e.amt) void patchExpense(e, { amt: a, who: me.id })
                 }}
               />
-              <button className="x nav" onClick={() => setMoveIds([e.id])} aria-label={`Перенести трату ${fmt(e.amt)} ₽`} title="Перенести в другую статью или день">
+              <MoveHandle className="x nav" rows={[e]} label={`Перенести трату ${fmt(e.amt)} ₽`} onClick={() => setMoveIds([e.id])} onDrop={dropTo([e])}>
                 ⇄
-              </button>
+              </MoveHandle>
               <button className="x" onClick={() => void removeRow('exp', e).then(() => toast('Трата удалена'))} aria-label={`Удалить трату ${fmt(e.amt)} ₽`}>
                 ×
               </button>
@@ -128,9 +134,9 @@ export function ExpenseCard({
         </p>
       )}
       {es.length > 1 && !moving.length && (
-        <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => setMoveIds(es.map((e) => e.id))}>
+        <MoveHandle className="btn ghost sm" style={{ alignSelf: 'flex-start' }} rows={es} label="Перенести все траты" onClick={() => setMoveIds(es.map((e) => e.id))} onDrop={dropTo(es)}>
           ⇄ Перенести все
-        </button>
+        </MoveHandle>
       )}
       {moving.length > 0 && (
         <MovePanel
@@ -138,7 +144,6 @@ export function ExpenseCard({
           fromC={c}
           fromDate={date}
           onCancel={() => setMoveIds(null)}
-          onPick={onPick ? () => onPick(moving) : undefined}
           onDone={(toC, toDate) => {
             setMoveIds(null)
             onMoved?.(toC, toDate)
@@ -173,20 +178,130 @@ export function ExpenseCard({
   )
 }
 
-/** Moves expenses entered into the wrong cell: pick the category and day, or pick the target cell in the table. */
+/**
+ * The ⇄ handle: drag it onto a table cell to move the expenses there (mouse or finger),
+ * or tap/click it to open the form with category and day.
+ */
+function MoveHandle({
+  rows,
+  label,
+  className,
+  style,
+  onClick,
+  onDrop,
+  children,
+}: {
+  rows: Expense[]
+  label: string
+  className: string
+  style?: CSSProperties
+  onClick: () => void
+  onDrop: (c: string, day: number) => void
+  children: ReactNode
+}) {
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const btn = e.currentTarget
+    const sx = e.clientX
+    const sy = e.clientY
+    const wrap = document.querySelector<HTMLElement>('.gridwrap, .mt-wrap')
+    const card = btn.closest<HTMLElement>('.pop, .ph-sheet')
+    const scrim = document.querySelector<HTMLElement>('.ph-scrim')
+    let dragging = false
+    let target: HTMLElement | null = null
+    let ghost: HTMLDivElement | null = null
+    let vx = 0
+    let vy = 0
+    const cellAt = (x: number, y: number) => (document.elementsFromPoint(x, y).find((el) => el.matches('td.d[data-c][data-d]')) as HTMLElement | undefined) ?? null
+    // Scroll the table while the pointer rests near its edges (or over the sticky columns).
+    const tick = window.setInterval(() => {
+      if (dragging && wrap && (vx || vy)) wrap.scrollBy(vx, vy)
+    }, 16)
+    try {
+      btn.setPointerCapture(e.pointerId)
+    } catch {
+      // capture is a nicety; window-level coordinates are enough
+    }
+    const move = (ev: PointerEvent) => {
+      if (!dragging) {
+        if (!wrap || Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return
+        dragging = true
+        ghost = document.createElement('div')
+        ghost.className = 'drag-ghost'
+        ghost.textContent = '⇄ ' + rub(sum(rows, (r) => r.amt))
+        document.body.appendChild(ghost)
+        card?.classList.add('dragging-out')
+        scrim?.classList.add('dragging-out')
+        document.body.classList.add('drag-moving')
+      }
+      ev.preventDefault()
+      if (ghost) ghost.style.transform = `translate(${ev.clientX + 14}px, ${ev.clientY - 34}px)`
+      const cell = cellAt(ev.clientX, ev.clientY)
+      if (cell !== target) {
+        target?.classList.remove('drop-target')
+        target = cell
+        target?.classList.add('drop-target')
+      }
+      if (wrap) {
+        const r = wrap.getBoundingClientRect()
+        const left = r.left + (wrap.querySelector<HTMLElement>('thead .name, thead .nm')?.offsetWidth ?? 0)
+        const right = r.right - (wrap.querySelector<HTMLElement>('thead .wt')?.offsetWidth ?? 0)
+        vx = ev.clientX < left + 24 ? -14 : ev.clientX > right - 24 ? 14 : 0
+        vy = ev.clientY < r.top + 56 ? -12 : ev.clientY > r.bottom - 48 ? 12 : 0
+      }
+    }
+    const finish = (cancelled: boolean) => {
+      window.clearInterval(tick)
+      btn.removeEventListener('pointermove', move)
+      btn.removeEventListener('pointerup', up)
+      btn.removeEventListener('pointercancel', cancel)
+      if (!dragging) {
+        if (!cancelled) onClick()
+        return
+      }
+      ghost?.remove()
+      card?.classList.remove('dragging-out')
+      scrim?.classList.remove('dragging-out')
+      document.body.classList.remove('drag-moving')
+      target?.classList.remove('drop-target')
+      if (!cancelled && target) onDrop(target.dataset.c!, +target.dataset.d!)
+    }
+    const up = () => finish(false)
+    const cancel = () => finish(true)
+    btn.addEventListener('pointermove', move)
+    btn.addEventListener('pointerup', up)
+    btn.addEventListener('pointercancel', cancel)
+  }
+  return (
+    <button
+      type="button"
+      className={className + ' mv-handle'}
+      style={style}
+      aria-label={label}
+      title="Перетащите на другую ячейку или нажмите, чтобы выбрать статью и день"
+      onPointerDown={onPointerDown}
+      // Keyboard activation (detail 0) opens the form; pointer taps are handled above.
+      onClick={(ev) => {
+        if (ev.detail === 0) onClick()
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Moves expenses entered into the wrong cell: pick the category and day. */
 function MovePanel({
   rows,
   fromC,
   fromDate,
   onCancel,
-  onPick,
   onDone,
 }: {
   rows: Expense[]
   fromC: string
   fromDate: string
   onCancel: () => void
-  onPick?: () => void
   onDone: (c: string, date: string) => void
 }) {
   const { data, toast, flash } = useApp()
@@ -235,11 +350,6 @@ function MovePanel({
       </div>
       <div className="mv-a">
         <button className="btn sm">Перенести</button>
-        {onPick && (
-          <button type="button" className="btn ghost sm" onClick={onPick}>
-            Выбрать ячейку в таблице
-          </button>
-        )}
         <button type="button" className="btn ghost sm" onClick={onCancel}>
           Отмена
         </button>
