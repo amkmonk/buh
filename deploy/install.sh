@@ -52,6 +52,10 @@ if [ "$FIRST_INSTALL" -eq 1 ]; then
   if [ "$HTTPS" -eq 1 ] && [ -z "$DOMAIN" ]; then
     die "укажите домен: --domain budget.example.org (или --no-https для домашней сети)"
   fi
+  case "$DOMAIN" in
+    my-budget.duckdns.org|budget.example.org|example.*|*.example.org|ваш-домен*)
+      die "в команде остался пример домена ($DOMAIN). Замените его на свой домен, который указывает на этот сервер" ;;
+  esac
   busy() { ss -tlnH "( sport = :$1 )" 2>/dev/null | grep -q .; }
   if [ "$HTTPS" -eq 1 ] && busy 80; then die "порт 80 занят: он нужен для получения сертификата"; fi
   if busy "$PORT"; then die "порт $PORT занят, выберите другой: --port 9443"; fi
@@ -129,7 +133,7 @@ systemctl is-active --quiet buh || { journalctl -u buh -n 20 --no-pager; die "с
 
 CLI="runuser -u buh -- env BUH_DB=/var/lib/buh/buh.db /opt/buh/buh-server"
 if [ -z "$($CLI user list 2>/dev/null)" ]; then
-  PASS="$(tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom | head -c 14)"
+  PASS="$(LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' </dev/urandom 2>/dev/null | head -c 14 || true)"
   $CLI user add "$LOGIN" "$LOGIN" "$PASS" >/dev/null
   CREATED="Первый пользователь: логин $LOGIN, пароль $PASS (смените в приложении)"
 fi

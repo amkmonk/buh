@@ -174,7 +174,7 @@ jobs:
 
             Установка или обновление сервера одной командой:
             ```
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/deploy/install.sh | sudo bash -s -- --domain ваш-домен
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/deploy/install.sh | sudo bash -s -- --domain ваш-домен.duckdns.org
             ```
           files: out/*
           fail_on_unmatched_files: true
