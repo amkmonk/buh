@@ -3,13 +3,33 @@ import { useApp } from '../state'
 import { Avatar, InlineEdit, useFlashClass } from './common'
 import { catsAt, groupsAt, balances, lastCheck } from '../lib/model'
 import { dayLabel, dim, fmt, monGen, monName, nextDay, pad, parseSigned, parseTerms, plural, rub, shiftYM, shortDay, sum, todayStr } from '../lib/format'
-import { addCheck, addExpenses, addIncome, patchExpense, patchIncome, removeRow, saveBook } from '../lib/repo'
-import type { Income } from '../lib/types'
+import { addCheck, addExpenses, addIncome, moveExpenses, patchExpense, patchIncome, removeRow, saveBook } from '../lib/repo'
+import type { Expense, Income } from '../lib/types'
 
 export const defaultDate = (M: string) => (todayStr().startsWith(M) ? todayStr() : M + '-01')
 
 /** Body of the expense card for one category and day: list, edit, delete, add. Used by the desktop popover and the mobile sheet. */
-export function ExpenseCard({ M, c, day, onDay, onClose, variant }: { M: string; c: string; day: number; onDay: (d: number) => void; onClose: () => void; variant: 'pop' | 'sheet' }) {
+export function ExpenseCard({
+  M,
+  c,
+  day,
+  onDay,
+  onClose,
+  variant,
+  onPick,
+  onMoved,
+}: {
+  M: string
+  c: string
+  day: number
+  onDay: (d: number) => void
+  onClose: () => void
+  variant: 'pop' | 'sheet'
+  /** When set, the move panel offers picking the target cell in the table. */
+  onPick?: (rows: Expense[]) => void
+  /** Called after expenses were moved through the form. */
+  onMoved?: (c: string, date: string) => void
+}) {
   const { data, me, toast, flash } = useApp()
   const flashCls = useFlashClass()
   const n = dim(M)
@@ -22,8 +42,10 @@ export function ExpenseCard({ M, c, day, onDay, onClose, variant }: { M: string;
   const [note, setNote] = useState('')
   const [bad, setBad] = useState(false)
   const amtRef = useRef<HTMLInputElement>(null)
+  const [moveIds, setMoveIds] = useState<string[] | null>(null)
 
   if (!cat) return null
+  const moving = moveIds ? es.filter((e) => moveIds.includes(e.id)) : []
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault()
@@ -91,6 +113,9 @@ export function ExpenseCard({ M, c, day, onDay, onClose, variant }: { M: string;
                   if (a !== e.amt) void patchExpense(e, { amt: a, who: me.id })
                 }}
               />
+              <button className="x nav" onClick={() => setMoveIds([e.id])} aria-label={`Перенести трату ${fmt(e.amt)} ₽`} title="Перенести в другую статью или день">
+                ⇄
+              </button>
               <button className="x" onClick={() => void removeRow('exp', e).then(() => toast('Трата удалена'))} aria-label={`Удалить трату ${fmt(e.amt)} ₽`}>
                 ×
               </button>
@@ -101,6 +126,24 @@ export function ExpenseCard({ M, c, day, onDay, onClose, variant }: { M: string;
         <p className="empty" style={{ padding: '4px 0' }}>
           В этот день по статье трат нет.
         </p>
+      )}
+      {es.length > 1 && !moving.length && (
+        <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => setMoveIds(es.map((e) => e.id))}>
+          ⇄ Перенести все
+        </button>
+      )}
+      {moving.length > 0 && (
+        <MovePanel
+          rows={moving}
+          fromC={c}
+          fromDate={date}
+          onCancel={() => setMoveIds(null)}
+          onPick={onPick ? () => onPick(moving) : undefined}
+          onDone={(toC, toDate) => {
+            setMoveIds(null)
+            onMoved?.(toC, toDate)
+          }}
+        />
       )}
       <form className="pop-f" onSubmit={submit}>
         <input
@@ -127,6 +170,81 @@ export function ExpenseCard({ M, c, day, onDay, onClose, variant }: { M: string;
         {variant === 'pop' && <span>Enter — добавить · Esc — закрыть</span>}
       </div>
     </>
+  )
+}
+
+/** Moves expenses entered into the wrong cell: pick the category and day, or pick the target cell in the table. */
+function MovePanel({
+  rows,
+  fromC,
+  fromDate,
+  onCancel,
+  onPick,
+  onDone,
+}: {
+  rows: Expense[]
+  fromC: string
+  fromDate: string
+  onCancel: () => void
+  onPick?: () => void
+  onDone: (c: string, date: string) => void
+}) {
+  const { data, toast, flash } = useApp()
+  const [date, setDate] = useState(fromDate)
+  const [c, setC] = useState(fromC)
+  const month = (date || fromDate).slice(0, 7)
+  const groups = groupsAt(data, month)
+  const cats = catsAt(data, month)
+  const target = cats.some((x) => x.id === c) ? c : (cats[0]?.id ?? '')
+  const total = sum(rows, (e) => e.amt)
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault()
+    if (!date || !target) return
+    if (target === fromC && date === fromDate) return onCancel()
+    flash(await moveExpenses(rows, target, date))
+    toast(`Перенесено ${rub(total)} в «${cats.find((x) => x.id === target)?.name}», ${shortDay(date)}`)
+    onDone(target, date)
+  }
+  return (
+    <form className="mv-panel" onSubmit={submit}>
+      <b>
+        Перенести {rows.length > 1 ? `${rows.length} ${plural(rows.length, 'трату', 'траты', 'трат')} на ` : ''}
+        {rub(total)}
+      </b>
+      <div className="mv-f">
+        <label className="fld">
+          Статья
+          <select value={target} onChange={(e) => setC(e.target.value)}>
+            {groups.map((g) => (
+              <optgroup key={g.id} label={g.name}>
+                {cats
+                  .filter((x) => x.g === g.id)
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label className="fld">
+          День
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+      </div>
+      <div className="mv-a">
+        <button className="btn sm">Перенести</button>
+        {onPick && (
+          <button type="button" className="btn ghost sm" onClick={onPick}>
+            Выбрать ячейку в таблице
+          </button>
+        )}
+        <button type="button" className="btn ghost sm" onClick={onCancel}>
+          Отмена
+        </button>
+      </div>
+    </form>
   )
 }
 

@@ -37,6 +37,7 @@ export interface Cat {
   id: string
   name: string
   g: string
+  bg?: string // row tint key, see ROW_TINTS
 }
 
 /** Groups and categories effective from `month` until the next snapshot. id = "s:" + month. */

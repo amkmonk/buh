@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../state'
+import { rowTint } from '../lib/tints'
 import { useFlashClass } from './common'
 import { cellKey, groupsAt, lastCheck, monthStats } from '../lib/model'
 import { GEN, WD, dim, fmt, pad, rub, sum, todayStr, trats, weekday, weeksOf } from '../lib/format'
@@ -7,7 +8,7 @@ import { GEN, WD, dim, fmt, pad, rub, sum, todayStr, trats, weekday, weeksOf } f
 const NAME_W = 96 // category column; long names wrap to two lines
 
 /** Month table for phones: three days per screen, sticky names and dates, days snap into place. */
-export function MobileTable({ M, sel, onCell }: { M: string; sel: { c: string; d: number } | null; onCell: (c: string, d: number) => void }) {
+export function MobileTable({ M, sel, moving, onCell }: { M: string; sel: { c: string; d: number } | null; moving?: boolean; onCell: (c: string, d: number) => void }) {
   const { data } = useApp()
   const flashCls = useFlashClass()
   const wrap = useRef<HTMLDivElement>(null)
@@ -104,7 +105,7 @@ export function MobileTable({ M, sel, onCell }: { M: string; sel: { c: string; d
   const colW = { width: dayW, minWidth: dayW, maxWidth: dayW }
 
   return (
-    <div className="mt-wrap" ref={wrap} style={{ scrollPaddingLeft: NAME_W }}>
+    <div className={'mt-wrap' + (moving ? ' moving' : '')} ref={wrap} style={{ scrollPaddingLeft: NAME_W }}>
       <table className="mt" style={{ ['--nw' as string]: NAME_W + 'px' }}>
         <thead>
           <tr>
@@ -137,7 +138,7 @@ export function MobileTable({ M, sel, onCell }: { M: string; sel: { c: string; d
                 <td className="tot">{cnum(sum(days, gday))}</td>
               </tr>,
               ...cats.map((c) => (
-                <tr className="cat" key={c.id}>
+                <tr className="cat" key={c.id} style={rowTint(c.bg)}>
                   <td className="nm">
                     <span>{c.name}</span>
                   </td>

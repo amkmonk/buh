@@ -24,6 +24,9 @@ export const addExpenses = (who: string, date: string, c: string, amounts: numbe
 
 export const patchExpense = (e: Expense, patch: Partial<Expense>) => save('exp', [{ ...e, ...patch }])
 
+/** Moves expenses to another category and/or day; the author stays the same. */
+export const moveExpenses = (rows: Expense[], c: string, date: string) => save('exp', rows.map((e) => ({ ...e, c, date })))
+
 export const addIncome = (i: Omit<Income, 'id' | 'updated_at' | 'deleted' | 'dirty'>) => save('inc', [{ ...i, id: newId() }])
 export const patchIncome = (i: Income, patch: Partial<Income>) => save('inc', [{ ...i, ...patch }])
 

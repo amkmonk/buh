@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../state'
+import { rowTint } from '../lib/tints'
 import { Avatar, GearIcon, Modal, SyncBadge, ThemeSwitch, useFlashClass } from './common'
 import { CheckForm, ExpenseCard, GroupSummary, IncomeAddForm, IncomeEditForm, incomeCount, useCheckSummary, whoList } from './shared'
 import { StructSettings, UsersSettings } from './settings'
 import { BackupsPanel } from './backups'
 import { balances, cellKey, groupsAt, lastCheck, monthStats, tileState } from '../lib/model'
 import { GEN, WD, curMonth, dayLabel, daysBetween, dim, fmt, monGen, monName, monthTitle, nextDay, pad, parseYM, rub, shiftYM, shortDay, sum, todayStr, trats, weekday, weeksOf } from '../lib/format'
-import { removeRow } from '../lib/repo'
+import { moveExpenses, removeRow } from '../lib/repo'
+import type { Expense } from '../lib/types'
 
 type View = 'table' | 'income' | 'settings'
 type ModalState = { kind: 'group'; g: string } | { kind: 'checks' } | null
 
 export function Desktop() {
-  const { data } = useApp()
+  const { data, toast, flash } = useApp()
   const [month, setMonth] = useState(curMonth())
+  const [moving, setMoving] = useState<Expense[] | null>(null)
   const [view, setView] = useState<View>('table')
   const [pop, setPop] = useState<{ c: string; day: number } | null>(null)
   const [modal, setModal] = useState<ModalState>(null)
@@ -27,6 +30,26 @@ export function Desktop() {
     setScrollDay(null)
   }
   const closeModal = useCallback(() => setModal(null), [])
+
+  // While moving, a click on a cell puts the expenses there; Esc cancels.
+  useEffect(() => {
+    if (!moving) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMoving(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [moving])
+  const dropInto = async (c: string, day: number) => {
+    if (!moving) return
+    const rows = moving
+    setMoving(null)
+    const date = M + '-' + pad(day)
+    const cat = monthStats(data, M).cats.find((x) => x.id === c)
+    flash(await moveExpenses(rows, c, date))
+    toast(`Перенесено ${rub(sum(rows, (e) => e.amt))} в «${cat?.name}», ${shortDay(date)}`)
+    setPop({ c, day })
+  }
 
   return (
     <div className="app">
@@ -43,12 +66,27 @@ export function Desktop() {
         onChecks={() => setModal({ kind: 'checks' })}
       />
       <div className="view">
+        {view === 'table' && moving && (
+          <div className="mv-bar" role="status">
+            <span>
+              Перенос{' '}
+              <b>
+                {trats(moving.length)} на {rub(sum(moving, (e) => e.amt))}
+              </b>
+              : нажмите ячейку, куда перенести. Можно переключить месяц.
+            </span>
+            <button className="btn ghost sm" onClick={() => setMoving(null)}>
+              Отмена
+            </button>
+          </div>
+        )}
         {view === 'table' && (
           <MonthTable
             M={M}
             pop={pop}
             scrollDay={scrollDay}
-            onCell={(c, day) => setPop({ c, day })}
+            moving={!!moving}
+            onCell={(c, day) => (moving ? void dropInto(c, day) : setPop({ c, day }))}
           />
         )}
         {view === 'income' && <IncomePage M={M} onBack={() => setView('table')} />}
@@ -61,6 +99,14 @@ export function Desktop() {
           day={pop.day}
           onDay={(d) => setPop({ c: pop.c, day: Math.min(Math.max(1, d), dim(M)) })}
           onClose={() => setPop(null)}
+          onPick={(rows) => {
+            setMoving(rows)
+            setPop(null)
+          }}
+          onMoved={(c, date) => {
+            if (!date.startsWith(M)) setMonth(date.slice(0, 7))
+            setPop({ c, day: +date.slice(8) })
+          }}
         />
       )}
       {modal?.kind === 'group' && <GroupModal M={M} g={modal.g} onClose={closeModal} />}
@@ -158,7 +204,19 @@ function Header(props: { M: string; start: string; view: View; onMonth: (m: stri
   )
 }
 
-function MonthTable({ M, pop, scrollDay, onCell }: { M: string; pop: { c: string; day: number } | null; scrollDay: number | null; onCell: (c: string, day: number) => void }) {
+function MonthTable({
+  M,
+  pop,
+  scrollDay,
+  moving,
+  onCell,
+}: {
+  M: string
+  pop: { c: string; day: number } | null
+  scrollDay: number | null
+  moving: boolean
+  onCell: (c: string, day: number) => void
+}) {
   const { data } = useApp()
   const flashCls = useFlashClass()
   const wrap = useRef<HTMLDivElement>(null)
@@ -251,7 +309,7 @@ function MonthTable({ M, pop, scrollDay, onCell }: { M: string; pop: { c: string
 
   const groups = groupsAt(data, M)
   return (
-    <div className="gridwrap" ref={wrap}>
+    <div className={'gridwrap' + (moving ? ' moving' : '')} ref={wrap}>
       <table className="sheet">
         <thead>
           <tr>
@@ -280,7 +338,7 @@ function MonthTable({ M, pop, scrollDay, onCell }: { M: string; pop: { c: string
                 <td className="wt">{cnum(sum(days, gday))}</td>
               </tr>,
               ...cats.map((c) => (
-                <tr className="cat" key={c.id}>
+                <tr className="cat" key={c.id} style={rowTint(c.bg)}>
                   <td className="name">{c.name}</td>
                   {days.map((d) => {
                     const es = cell(c.id, d)
@@ -330,7 +388,23 @@ function MonthTable({ M, pop, scrollDay, onCell }: { M: string; pop: { c: string
 }
 
 /** Floating card next to the selected cell; follows the cell while the table scrolls. */
-function CellPop({ M, c, day, onDay, onClose }: { M: string; c: string; day: number; onDay: (d: number) => void; onClose: () => void }) {
+function CellPop({
+  M,
+  c,
+  day,
+  onDay,
+  onClose,
+  onPick,
+  onMoved,
+}: {
+  M: string
+  c: string
+  day: number
+  onDay: (d: number) => void
+  onClose: () => void
+  onPick: (rows: Expense[]) => void
+  onMoved: (c: string, date: string) => void
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: -9999, top: 0 })
 
@@ -393,7 +467,7 @@ function CellPop({ M, c, day, onDay, onClose }: { M: string; c: string; day: num
 
   return (
     <div className="pop" ref={ref} role="dialog" aria-label="Траты в ячейке" style={{ left: pos.left, top: pos.top }}>
-      <ExpenseCard key={`${M}|${c}|${day}`} M={M} c={c} day={day} onDay={onDay} onClose={onClose} variant="pop" />
+      <ExpenseCard key={`${M}|${c}|${day}`} M={M} c={c} day={day} onDay={onDay} onClose={onClose} variant="pop" onPick={onPick} onMoved={onMoved} />
     </div>
   )
 }

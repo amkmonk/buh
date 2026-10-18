@@ -6,7 +6,8 @@ import { curMonth, monGen, monName, monthTitle, newId, parseYM, plural, rub, shi
 import { removeRows, saveBook, saveStructs } from '../lib/repo'
 import { ApiError, OfflineError, authed } from '../lib/api'
 import { kvSet } from '../lib/db'
-import type { Cat, Group, User } from '../lib/types'
+import type { Cat, Group, Struct, User } from '../lib/types'
+import { ROW_TINTS, rowTint } from '../lib/tints'
 
 const swap = <T,>(a: T[], i: number, j: number) => {
   const t = a[i]
@@ -75,6 +76,19 @@ export function useStructOps(M: string) {
       })
       toast(`Статья удалена с ${monGen(M)}`)
     },
+    /** Row tint belongs to the category itself, so it applies in every month. */
+    setCatTint: (id: string, bg: string) =>
+      saveStructs(
+        data.structs
+          .filter((s) => s.cats.some((c) => c.id === id))
+          .map((s) => {
+            const copy: Struct = JSON.parse(JSON.stringify(s))
+            const c = copy.cats.find((x) => x.id === id)!
+            if (bg) c.bg = bg
+            else delete c.bg
+            return copy
+          }),
+      ),
     deleteGroup: async (id: string) => {
       await removeRows(
         'inc',
@@ -190,6 +204,7 @@ export function StructSettings({ M }: { M: string }) {
                   <span className="nm">
                     <InlineEdit className="lnk" value={c.name} display={c.name} text label="Название статьи" onCommit={(v) => (v.trim() ? void ops.renameCat(c.id, v.trim()) : false)} />
                   </span>
+                  <TintPicker value={c.bg} label={c.name} onPick={(k) => void ops.setCatTint(c.id, k)} />
                   <small>{cnt.get(c.id) ? `${trats(cnt.get(c.id)!)} в ${monName(M)}` : `трат в ${monName(M)} нет`}</small>
                   <select className="inp mv" value={g.id} onChange={(e) => void ops.setCatGroup(c.id, e.target.value)} aria-label={`Группа статьи ${c.name}`}>
                     {groups.map((x) => (
@@ -438,15 +453,54 @@ export function MobileStructSettings({ M }: { M: string }) {
           {catsAt(data, M)
             .filter((c) => c.g === g.id)
             .map((c) => (
-              <div className="ph-row static" key={c.id}>
+              <div className="ph-row static wrap" key={c.id} style={rowTint(c.bg)}>
                 <span>
                   <InlineEdit className="lnk" value={c.name} display={c.name} text label="Название статьи" onCommit={(v) => (v.trim() ? void ops.renameCat(c.id, v.trim()) : false)} />
                 </span>
+                <TintPicker value={c.bg} label={c.name} onPick={(k) => void ops.setCatTint(c.id, k)} />
               </div>
             ))}
           <AddByName className="cg-add" placeholder="Новая статья" button="Добавить" ghost onAdd={(name) => void ops.addCat(g.id, name).then(() => toast(`Статья «${name}» добавлена`))} />
         </div>
       ))}
+    </>
+  )
+}
+
+const swatch = (key: string) => (key ? ({ ['--sw' as string]: `var(--tint-${key})` } as React.CSSProperties) : undefined)
+
+/** Small swatch showing a category's row tint; opens the palette on click. */
+function TintPicker({ value, label, onPick }: { value?: string; label: string; onPick: (key: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const cur = ROW_TINTS.find((t) => t.key === (value ?? '')) ?? ROW_TINTS[0]
+  return (
+    <>
+      <button
+        className={'tint' + (cur.key ? '' : ' none')}
+        style={swatch(cur.key)}
+        aria-expanded={open}
+        title="Фон строки"
+        aria-label={`Фон строки «${label}»: ${cur.name.toLowerCase()}. Изменить`}
+        onClick={() => setOpen(!open)}
+      />
+      {open && (
+        <div className="tint-row" role="group" aria-label={`Фон строки «${label}»`}>
+          {ROW_TINTS.map((t) => (
+            <button
+              key={t.key}
+              className={'tint' + (t.key ? '' : ' none')}
+              style={swatch(t.key)}
+              aria-pressed={t.key === cur.key}
+              title={t.name}
+              aria-label={t.name}
+              onClick={() => {
+                onPick(t.key)
+                setOpen(false)
+              }}
+            />
+          ))}
+        </div>
+      )}
     </>
   )
 }
