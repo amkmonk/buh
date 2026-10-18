@@ -125,3 +125,7 @@ cd server && go test ./...             # тесты сервера
 
 - **Сборка приложений:** `npm run win:build` (нужны Rust и Visual Studio Build Tools) и `npm run android:build` (нужны JDK 21 и Android SDK).
 - **Релизы** собирает GitHub Actions по тегу `vX.Y.Z`. Для подписи APK в форке добавьте секреты `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` и `ANDROID_KEY_ALIAS`.
+
+## Лицензия
+
+[MIT](LICENSE): можно свободно использовать, изменять и распространять, в том числе в коммерческих целях, сохраняя уведомление об авторских правах. Программа предоставляется «как есть», без гарантий.
