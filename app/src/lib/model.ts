@@ -1,5 +1,5 @@
 import type { Book, Cat, Check, Expense, Group, Income, Struct, User } from './types'
-import { shiftYM } from './format'
+import { dim, fmt, shiftYM } from './format'
 
 export interface Data {
   exps: Expense[]
@@ -98,6 +98,25 @@ export function tileState(b: Balances, g: string) {
   const tone: 'ok' | 'warn' | 'bad' = end < 0 ? 'bad' : avail && end / avail < 0.1 ? 'warn' : 'ok'
   const pct = avail ? Math.min(100, (sp / avail) * 100) : sp ? 100 : 0
   return { carry, inc, sp, end, tone, pct }
+}
+
+/**
+ * What a group tile shows next to the balance:
+ * future months — how the balance is made up, "52 012 + 100 000";
+ * current month with the daily option — what is left per remaining day, "1 000/д";
+ * otherwise nothing.
+ */
+export function tileExtra(t: ReturnType<typeof tileState>, M: string, group: Group, today: string): string {
+  const cur = today.slice(0, 7)
+  if (M > cur) {
+    if (!t.inc && !t.sp) return ''
+    return `${fmt(t.carry)} + ${fmt(t.inc)}` + (t.sp ? ` − ${fmt(t.sp)}` : '')
+  }
+  if (M === cur && group.daily && t.end > 0) {
+    const left = dim(M) - +today.slice(8) + 1
+    return `${fmt(Math.floor(t.end / left))}/д`
+  }
+  return ''
 }
 
 export function lastCheck(d: Data): Check | null {

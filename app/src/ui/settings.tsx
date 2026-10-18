@@ -76,6 +76,19 @@ export function useStructOps(M: string) {
       })
       toast(`Статья удалена с ${monGen(M)}`)
     },
+    /** The per-day allowance on the tile is a property of the group, the same in every month. */
+    setGroupDaily: (id: string, on: boolean) =>
+      saveStructs(
+        data.structs
+          .filter((s) => s.groups.some((g) => g.id === id))
+          .map((s) => {
+            const copy: Struct = JSON.parse(JSON.stringify(s))
+            const g = copy.groups.find((x) => x.id === id)!
+            if (on) g.daily = true
+            else delete g.daily
+            return copy
+          }),
+      ),
     /** Row tint belongs to the category itself, so it applies in every month. */
     setCatTint: (id: string, bg: string) =>
       saveStructs(
@@ -168,6 +181,7 @@ export function StructSettings({ M }: { M: string }) {
               <small>
                 {list.length} {plural(list.length, 'статья', 'статьи', 'статей')}
               </small>
+              <DailyToggle on={!!g.daily} onChange={(v) => void ops.setGroupDaily(g.id, v)} />
               <span className="tools">
                 <button className="x nav" disabled={gi === 0} onClick={() => void ops.moveGroup(g.id, -1)} aria-label="Поднять группу">
                   ↑
@@ -449,6 +463,7 @@ export function MobileStructSettings({ M }: { M: string }) {
         <div className="ph-g" key={g.id}>
           <div className="ph-gh">
             <InlineEdit className="lnk" value={g.name} display={g.name} text label="Название группы" onCommit={(v) => (v.trim() ? void ops.renameGroup(g.id, v.trim()) : false)} />
+            <DailyToggle on={!!g.daily} onChange={(v) => void ops.setGroupDaily(g.id, v)} />
           </div>
           {catsAt(data, M)
             .filter((c) => c.g === g.id)
@@ -502,5 +517,15 @@ function TintPicker({ value, label, onPick }: { value?: string; label: string; o
         </div>
       )}
     </>
+  )
+}
+
+/** "Остаток в день" option of a group: the tile then shows what is left per remaining day of the current month. */
+function DailyToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="daily" title="В текущем месяце плашка группы покажет, сколько можно тратить в день до конца месяца">
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+      остаток в день на плашке
+    </label>
   )
 }

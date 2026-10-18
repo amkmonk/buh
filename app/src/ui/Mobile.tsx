@@ -5,7 +5,7 @@ import { Avatar, ConfirmBox, GearIcon, SyncBadge, ThemeSwitch, useFlashClass } f
 import { CheckForm, ExpenseCard, GroupSummary, IncomeAddForm, IncomeEditForm, useCheckSummary, whoList } from './shared'
 import { MobileStructSettings } from './settings'
 import { BackupsPanel } from './backups'
-import { balances, cellKey, groupsAt, lastCheck, monthStats, tileState } from '../lib/model'
+import { balances, cellKey, groupsAt, lastCheck, monthStats, tileExtra, tileState } from '../lib/model'
 import { WD, capitalize, compact, curMonth, dayLabel, dim, fmt, monName, monthTitle, pad, rub, shiftYM, shortDay, sum, todayStr, trats, weekday, weeksOf } from '../lib/format'
 import { removeRow } from '../lib/repo'
 import { useSyncState } from '../lib/sync'
@@ -223,11 +223,13 @@ function Tiles({ M, onTile }: { M: string; onTile: (g: string) => void }) {
     <div className="ph-tiles">
       {groupsAt(data, M).map((g) => {
         const t = tileState(b, g.id)
+        const x = tileExtra(t, M, g, todayStr())
         return (
           <button key={g.id} className="ph-tile" onClick={() => onTile(g.id)} aria-label={`${g.name}: остаток ${rub(t.end)}. Открыть доходы группы`}>
             <span className="gt-h">
               <b>{g.name}</b>
               <span className={'num ' + t.tone}>{fmt(t.end)}</span>
+              {x && <small className="gt-x">({x})</small>}
             </span>
             <span className={'bar ' + t.tone}>
               <i style={{ width: t.pct.toFixed(1) + '%' }} />

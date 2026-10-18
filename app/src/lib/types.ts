@@ -32,6 +32,7 @@ export interface Check extends SyncMeta {
 export interface Group {
   id: string
   name: string
+  daily?: boolean // show the per-day allowance on the tile in the current month
 }
 export interface Cat {
   id: string

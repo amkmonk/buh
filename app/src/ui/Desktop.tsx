@@ -5,11 +5,20 @@ import { Avatar, GearIcon, Modal, SyncBadge, ThemeSwitch, useFlashClass } from '
 import { CheckForm, ExpenseCard, GroupSummary, IncomeAddForm, IncomeEditForm, incomeCount, useCheckSummary, whoList } from './shared'
 import { StructSettings, UsersSettings } from './settings'
 import { BackupsPanel } from './backups'
-import { balances, cellKey, groupsAt, lastCheck, monthStats, tileState } from '../lib/model'
+import { balances, catsAt, cellKey, groupsAt, lastCheck, monthStats, tileExtra, tileState, type Data } from '../lib/model'
 import { GEN, WD, curMonth, dayLabel, daysBetween, dim, fmt, monGen, monName, monthTitle, nextDay, pad, parseYM, rub, shiftYM, shortDay, sum, todayStr, trats, weekday, weeksOf } from '../lib/format'
 import { removeRow } from '../lib/repo'
 
 type View = 'table' | 'income' | 'settings'
+
+const ARROWS: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }
+
+/** The cell next to (c, day): rows follow the table order (groups, then their categories). */
+function stepCell(data: Data, M: string, c: string, day: number, rows: number, days: number) {
+  const order = groupsAt(data, M).flatMap((g) => catsAt(data, M).filter((x) => x.g === g.id).map((x) => x.id))
+  const i = order.indexOf(c)
+  return { c: order[Math.min(Math.max(0, i + rows), order.length - 1)] ?? c, day: Math.min(Math.max(1, day + days), dim(M)) }
+}
 type ModalState = { kind: 'group'; g: string } | { kind: 'checks' } | null
 
 export function Desktop() {
@@ -28,6 +37,7 @@ export function Desktop() {
     setScrollDay(null)
   }
   const closeModal = useCallback(() => setModal(null), [])
+  const step = useCallback((rows: number, days: number) => setPop((p) => (p ? stepCell(data, M, p.c, p.day, rows, days) : p)), [data, M])
 
   return (
     <div className="app">
@@ -55,6 +65,7 @@ export function Desktop() {
           day={pop.day}
           onDay={(d) => setPop({ c: pop.c, day: Math.min(Math.max(1, d), dim(M)) })}
           onClose={() => setPop(null)}
+          onStep={step}
           onMoved={(c, date) => {
             if (!date.startsWith(M)) setMonth(date.slice(0, 7))
             setPop({ c, day: +date.slice(8) })
@@ -134,12 +145,14 @@ function Header(props: { M: string; start: string; view: View; onMonth: (m: stri
       <div className="gtiles">
         {groupsAt(data, M).map((g) => {
           const t = tileState(b, g.id)
+          const x = tileExtra(t, M, g, todayStr())
           const tip = `${g.name}: с прошлого месяца ${rub(t.carry)}, пришло ${rub(t.inc)}, потрачено ${rub(t.sp)}, остаток ${rub(t.end)}. Нажмите, чтобы открыть доходы группы`
           return (
             <button key={g.id} className="gt" onClick={() => props.onGroup(g.id)} title={tip} aria-label={tip}>
               <span className="gt-h">
                 <b>{g.name}</b>
                 <span className={'num ' + t.tone}>{fmt(t.end)}</span>
+                {x && <small className="gt-x">({x})</small>}
               </span>
               <span className={'bar ' + t.tone}>
                 <i style={{ width: t.pct.toFixed(1) + '%' }} />
@@ -307,7 +320,15 @@ function MonthTable({
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
                             onCell(c.id, d)
+                            return
                           }
+                          const s = ARROWS[e.key]
+                          if (!s) return
+                          e.preventDefault()
+                          const n = stepCell(data, M, c.id, d, s[0], s[1])
+                          const next = wrap.current?.querySelector<HTMLElement>(`td.d[data-c="${n.c}"][data-d="${n.day}"]`)
+                          next?.focus()
+                          next?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
                         }}
                       >
                         {cnum(cday(c.id, d))}
@@ -345,6 +366,7 @@ function CellPop({
   onDay,
   onClose,
   onMoved,
+  onStep,
 }: {
   M: string
   c: string
@@ -352,6 +374,8 @@ function CellPop({
   onDay: (d: number) => void
   onClose: () => void
   onMoved: (c: string, date: string) => void
+  /** Arrow keys: rows (categories) and days to move by. */
+  onStep: (rows: number, days: number) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: -9999, top: 0 })
@@ -376,9 +400,17 @@ function CellPop({
       const r = el.getBoundingClientRect()
       const w = p.offsetWidth
       const h = p.offsetHeight
-      const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8)
-      let top = r.bottom + 6
-      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      // Beside the cell: to the right, or to the left when there is no room; below only as a last resort.
+      let left = r.right + 8
+      if (left + w > vw - 8) left = r.left - w - 8
+      let top = Math.min(Math.max(8, r.top - 12), vh - h - 8)
+      if (left < 8) {
+        left = Math.min(Math.max(8, r.left), vw - w - 8)
+        top = r.bottom + 6
+        if (top + h > vh - 8) top = Math.max(8, r.top - h - 6)
+      }
       setPos((old) => (old.left === left && old.top === top ? old : { left, top }))
     }
     place()
@@ -403,7 +435,17 @@ function CellPop({
       if (e.key === 'Escape') {
         onClose()
         document.querySelector<HTMLElement>(`td.d[data-c="${c}"][data-d="${day}"]`)?.focus({ preventScroll: true })
+        return
       }
+      const step = ARROWS[e.key]
+      if (!step || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      const t = e.target as HTMLElement
+      // Leave arrows to controls that need them: lists, dates, inline edits, the move form.
+      if (t.closest('select, input[type="date"], .inl, .mv-panel')) return
+      // In a filled text field left/right move the caret.
+      if (t instanceof HTMLInputElement && step[1] !== 0 && t.value !== '') return
+      e.preventDefault()
+      onStep(step[0], step[1])
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
@@ -411,7 +453,7 @@ function CellPop({
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
     }
-  }, [c, day, onClose])
+  }, [c, day, onClose, onStep])
 
   return (
     <div className="pop" ref={ref} role="dialog" aria-label="Траты в ячейке" style={{ left: pos.left, top: pos.top }}>
